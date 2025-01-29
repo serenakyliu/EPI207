@@ -1,0 +1,1160 @@
+---
+title: "Epi 207 Assigment 1"
+author: "Nicola Churchill"
+date: "2025-01-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Loading/Creating functions
+````{r}
+#can put these functions in the utility functions
+look_for_loop <- function(.data, contains){
+  info <- .data %>%
+    look_for(contains)
+  
+  dataname <- deparse(substitute(.data))
+  
+  return(list(info=info,
+              dataname=dataname))
+  
+}
+
+percent_missing_values <- function(.data){
+  100*(sum(colSums(is.na(.data)))/(nrow(.data)*ncol(.data)))
+}
+
+is_categorical_var <- function(var){
+  (between(n_distinct(var[!is.na(var)]),3,20))
+}
+
+check_values <- function(.data, var){
+  temp <- .data %>%
+    select({{var}}) %>%
+    unique() %>%
+    arrange(!!sym(var)) %>%
+    as.matrix() %>% as.vector()
+  final_vec <- c(var, temp)
+  return(final_vec)
+}
+
+count_values <- function(.data, var){
+  temp <- .data %>%
+    select({{var}}) %>%
+    unique() %>% count() %>%
+    as.matrix() %>% as.vector()
+  return(temp)
+}
+
+check_values_df <- function(data){
+  data2_var <- data %>%
+    select(where(is_categorical_var)) %>%
+    colnames()
+
+  x <- map(data2_var, check_values, .data=data)
+  return(x)
+}
+```
+
+#Cleaning Functions
+```{r}
+#Alternative packages to load using install.packages() and library()
+#flextable, knitr, gtsummary, tidyverse, sas7bdat, glmnet, haven, dplyr
+
+#Load useful packages simultaneously 
+epi207_packages <- function(){
+  
+  if (!require("pacman")){install.packages("pacman", repos = 
+                                             'http://cran.us.r-project.org')}
+  
+  {
+    pacman::p_load(
+      
+      "rlang",       #for Non-standard evaluation: eval(), expr(), ensym(), 
+                     #  caller_env(), exec(), !!
+      "magrittr",    #for the pipe operator: %>% and %<>%
+      "broom",       #for tidying up the results of a regression: tidy()
+      "lubridate",   #for manipulating dates: today()
+      "haven",       #load stata, SAS, SPSS data
+      "readxl",      #load excel data: read_excel()
+      "writexl",     #write excel doc: write_xlsx()
+      "labelled",    #labelleling the data: set_variable_labels(), 
+                     #  set_value_labels()
+      
+      # Other great packages
+      "mise",         #clears environment: mise()
+      "here",         #set directory: here()
+      "pacman",       #load packages: p_load(), p_vignette()
+      "simulr",       #various useful functions
+      "glue",         #replaces paste: glue()
+      
+      # Making tables
+      "knitr",        #create tables: kable()
+      "formattable",  #to get the digits without rounding: digits()
+      "flextable",    #create tables: as_flextable()
+      "gtsummary",    #create nice labelled tables: tbl_summary(), as_tibble()
+      "gt",
+      "gtools",
+      "gdtools",
+      
+      #For manipulating data
+      "tidyverse",
+      "srvyr",
+      "sampling",
+      "sas7bdat",
+      
+      "survey",
+      "mice",
+      "micemd",
+      "miceRanger",
+      "glmnet"
+    )
+    
+    search()
+    
+  }
+}
+#e.g. cipreme_packages()
+
+#check if you are in an R project
+check_Rproject_exists <- function(){
+  dplyr::if_else(length(list.files(path = here::here(), pattern = "\\.Rproj$")) 
+                 > 0,
+                 "You are working in an R Project. You can go on.",
+                 "STOP!!! Please create an R Project before going 
+                 further:\nGo to File --> New Project --> 
+                 New Directory --> New Project."
+  )
+}
+#e.g. check_Rproject_exists()
+
+#create new folers
+create_folders <- function(){
+  
+  
+  folder_names <- c("data", "rmd", "docs", "figures", "tables", "scripts")
+  purrr::walk(folder_names, dir.create)
+  
+  sub_folder_data <- c(here("data", "raw_data"),
+                       here("data", "output_data"))
+  
+  purrr::walk(sub_folder_data, dir.create)
+  
+  
+  sub_folder_docs <- c(here("docs", "Lit"),
+                       here("docs", "Manuscript")
+  )
+  
+  purrr::walk(sub_folder_docs, dir.create)
+  
+}
+#e.g. create_folders()
+
+#removes everything in the environment except that one object
+remove_all_but <- function(...) {
+  names <- as.character(rlang::enexprs(...))
+  rm(list=setdiff(ls(pos=1), names), pos=1)
+}
+#e.g. remove_all_but(object1).
+
+#summary function for a single variale for getting mean, median, sd, sum, etc..
+estimate <- function(x){
+  temp <- c(length(x), mean(x,na.rm = T), median(x,na.rm = T),sd(x,na.rm = T),
+            max(x,na.rm = T), min(x,na.rm = T),
+            sum(x,na.rm = T), quantile(x,c(0.025, 0.975),na.rm = T),
+            sum(is.na(x)))
+  names(temp) <- c("N", "Mean", "Median",
+                   "Sd", "Max", "Min","Sum", "p2.5th", "p97.5th", "Missing")
+  return(round(temp, 2))
+}
+#e.g. estimate(dataset$var1) or simply estimate(var1) if var is in environment
+
+
+#summary function for a single variale in a dataset for getting mean, median, 
+# sd, sum, etc..
+pestimate <- function(.data, ...) {
+  .myvars <- rlang::enquos(...)
+  
+  .data %>%
+    select(!!!.myvars) %>%
+    select(where(is.numeric)) %>%
+    map_dfc(estimate) %>%
+    t() %>%
+    magrittr::set_colnames(c("N", "Mean", "Median",
+                             "Sd", "Max", "Min","Sum", "p2.5th", "p97.5th", 
+                             "Missing")) ->x
+  return(x)
+}
+
+#summary function for all variables in a dataset for getting mean, median, 
+# sd, sum, etc..
+pestimate_df <- function(.data) {
+  
+  .data %>%
+    select(where(is.numeric)) %>%
+    map_dfc(estimate) %>%
+    t() %>%
+    set_colnames(c("N", "Mean", "Median",
+                   "Sd", "Max", "Min","Sum", "p2.5th", "p97.5th", 
+                   "Missing")) %>%
+    as.data.frame() %>%
+    rownames_to_column(var = "Variables")
+}
+#this one returns a data.frame
+#e.g. pestimate_df(data=dataset)
+
+#summary function for all variables in a dataset for getting mean, median, 
+# sd, sum, etc..
+pestimate_tbl <- function(data){
+  data <- as_tibble(data)
+  pestimate_df(data) %>% as_tibble() %>%
+    select(Variables, N, Mean, Median, Sd, p2.5th, p97.5th) %>%
+    filter(!Variables=="id")
+}
+
+#this one returns a tibble
+#e.g. pestimate_tbl(data=dataset)
+
+#summary function for all variables in a dataset for getting mean, median, 
+# sd, sum, etc..
+pestimate_tblx <- function(data,
+                           functions=c("N", "Mean", "Median",
+                                       "Sd", "Max", "Min","Sum",
+                                       "p2.5th", "p97.5th", "Missing")){
+  data <- as_tibble(data)
+  pestimate_df(data) %>% as_tibble() %>%
+    select(Variables, all_of(functions)) %>%
+    filter(!Variables=="id")
+}
+#this one is more flexible and returns a tibble
+#e.g. pestimate_tblx(data=dataset, functions=c("N", "Mean))
+
+#to round all numeric variable in a dataset
+round_df <- function(df, digits) {
+  nums <- vapply(df, is.numeric, FUN.VALUE = logical(1))
+  
+  df[,nums] <- round(df[,nums], digits = digits)
+  (df)
+}
+#e.g. round_df(df=dataset, digits=1))
+
+
+#to quote objects
+qc <- function(...) {
+  args <- rlang::ensyms(...)
+  paste(purrr::map(args, as_string), sep = "")
+}
+#e.g. qc(object1). This is equivalent to writing c("object")
+
+#to unquote objects in their environment
+unquote_all <- function(fun=list,...){
+  args <- rlang::syms(...)
+  eval(expr(fun(!!!args)))
+}
+#e.g. unquote_all(dataset_names)
+#This is similar to
+#do.call("list",mget(dataset_names))
+#where dataset_names is the list of names
+
+#to present summary estimates for variables
+describer <- function(...){
+  Hmisc::describe(as.matrix(...))
+}
+#e.g. describer(dataset)
+
+#to plot missing values
+gtmiss <- function(...){
+  DataExplorer::profile_missing(...) %>% 
+    arrange(pct_missing) %>% 
+    print(n=Inf)
+}
+#e.g. gtmiss(dataset)
+
+#to list missing values
+ggmiss <- function(...){
+  DataExplorer::plot_missing(...) 
+}
+#e.g. ggmiss(dataset)
+
+#to output huxtable, flextable and tibble format table
+table1 <- function(table){
+  
+  table %>%
+    gtsummary::as_hux_table() -> hux
+  
+  table %>%
+    gtsummary::as_flex_table() -> flex
+  
+  table %>%
+    gtsummary::as_tibble() -> tibl
+  
+  return(list(hux=hux, flex=flex, to_import=tibl))
+}
+#e.g. table1(gtsummary_table_object)
+
+#to view table in Viewer
+my_viewer <- function(tab){
+  # generate a temporary html file and display it
+  dir <- tempfile()
+  dir.create(dir)
+  htmlFile <- file.path(dir, "index.html")
+  
+  options(kableExtra.auto_format = FALSE)
+  library(knitr)
+  library(kableExtra)
+  
+  tab %>%
+    kable(caption = "Table") %>%
+    kable_styling(bootstrap_options = c("striped", "bordered"),
+                  full_width = F) %>%
+    save_kable(file = htmlFile, self_contained = T)
+  
+  rstudioapi::viewer(htmlFile)
+}
+#e.g. my_viewer(gtsummary_table_object)
+
+#to create a binary variable
+d <- function(expr){
+  as.numeric(expr)
+}
+#e.g. male = d(sex==1). This is similar to male = as.numeric(sex==1)
+
+#to remove some labels in all the dataset, especially the missing labels
+remove_some_labels <- function(.data, labels=c(96:99)) {
+  
+  var_names <- .data %>% select(where(is.labelled)) %>% colnames()
+  
+  list_na_labels <- rep(list(labels),times=length(var_names))
+  
+  .data[, var_names] <- list_na_labels %>%
+    set_names(var_names) %>%
+    { exec(remove_value_labels, .data[, var_names], !!!.) }
+  
+  return(.data)
+  
+}
+#e.g. data %>%  remove_some_labels(labels=c(96:99))
+#to do for one variable: data %>% mutate(var1 = 
+# labelled::remove_val_labels(var1))
+
+#to output the codebook for the dataset
+codebook_var <- function(.data, var) {
+ 
+  
+  list_var <- .data %>%
+    look_for(var) %>%
+    as_tibble() %>%
+    select(variable) %>%
+    as.matrix() %>%
+    as.vector()
+  
+  binary_var <- .data %>%
+    dplyr::select(where(is_binary_var)) %>%
+    colnames()
+  
+  .data %>%
+    select(all_of(list_var)) %>%
+    codebook::codebook_table() %>%
+    dplyr::rename(`Variable name` = name,
+                  Label = label,
+                  `Variable type` = data_type,
+                  #Values = value_labels,
+                  `Complete rate` = complete_rate) %>%
+    select(-c(n_missing, min, sd, median, max, mean, hist, 
+              contains("format"))) %>%
+    mutate(`Variable type` = 
+             case_when(`Variable type`=="haven_labelled" ~ "categorical",
+                       `Variable type`=="factor" ~ "categorical",
+                       `Variable type`=="numeric" ~ "continuous",
+                                       TRUE ~ `Variable type`),
+           `Variable type` = 
+             case_when(`Variable name` %in% binary_var~ "binary",
+                                       TRUE ~ `Variable type`),
+           value_labels = 
+             case_when(`Variable name` %in% binary_var~ "0, 1",
+                                    TRUE ~ value_labels),
+           n_value_labels = 
+             case_when(`Variable name` %in% binary_var ~ as.integer(2),
+                                      TRUE ~ as.integer(n_value_labels))) %>% 
+    as_tibble()
+  
+}
+#e.g. codebook_var(dataset, var="")
+
+#to check the unique values for a variable
+check_values <- function(.data, var){
+  temp <- .data %>%
+    select({{var}}) %>%
+    unique() %>%
+    arrange(!!sym(var)) %>%
+    as.matrix() %>% as.vector()
+  final_vec <- c(var, temp)
+  return(final_vec)
+}
+#e.g check_values(dataset, "var1")
+
+#to count the unique values for a variable
+count_values <- function(.data, var){
+  temp <- .data %>%
+    select({{var}}) %>%
+    unique() %>% count() %>%
+    as.matrix() %>% as.vector()
+  return(temp)
+}
+#e.g count_values(dataset, "var1")
+
+#to check the unique values for all variables in dataset
+check_values_df <- function(data){
+  data2_var <- data %>%
+    select(where(is_categorical_var)) %>%
+    colnames()
+  
+  x <- map(data2_var, check_values, .data=data)
+  return(x)
+}
+#e.g check_values(dataset)
+
+#to check if it is a categorical, binaary, continuous variable
+is_categorical_var <- function(var){
+  #(is.labelled(var) | is.factor(var) | is.character(var)) | (between(n_distinct(x[!is.na(x)]),3,20))
+  (between(n_distinct(var[!is.na(var)]),3,20))
+}
+#e.g. is_categorical_var(x)
+is_binary_var <- function(var){
+  n_distinct(var[!is.na(var)])<=2
+}
+#e.g. is_binary_var(x)
+
+is_continous_var <- function(var){
+  
+  if (is.labelled(var)) {
+    var = as.factor(var)
+  }
+  
+  !(n_distinct(var[!is.na(var)])<=2 | is.factor(var))
+}
+#e.g. is_continous_var(x)
+
+#e.g. is_categorical_var(dataset$var)
+
+#to check the missing pattern in a variable
+is_missing_pattern <- function(vars, value){
+  max(vars, na.rm = T) == value
+}
+#e.g. is_missing_pattern(dataset$var, value=99)
+
+#To remove missing values in a variable
+to_missing <- function(variable, values=c(97,98,99)){
+  newx <- replace(variable, which(variable %in% values), NA)
+  newx
+}
+#e.g. dataset %>% mutate(var1 = to_missing(var1, values=c(98)))
+#thiis is better than na_if() as if can only replace one vlue at a time
+#To remove missing values in a dataset: be careful of this one. Need to
+#check to make sure
+clean_missing <- function(data){
+  data %>%
+    mutate_if(~ any(is_missing_pattern(.x, value=9)),      
+              ~replace(., which(. %in% list(7,8,9)), NA)) %>%
+    mutate_if(~ any(is_missing_pattern(.x, value=99)),     
+              ~replace(., which(. %in% list(77,88,99)), NA)) %>%
+    mutate_if(~ any(is_missing_pattern(.x, value=999)),    
+              ~replace(., which(. %in% list(777,888,999)), NA)) %>%
+    mutate_if(~ any(is_missing_pattern(.x, value=9999)),   
+              ~replace(., which(. %in% list(7777,8888,9999)), NA)) %>%
+    mutate_if(~ any(is_missing_pattern(.x, value=99999)),  
+              ~replace(., which(. %in% list(77777,88888,99999)), NA)) %>%
+    mutate_if(~ any(is_missing_pattern(.x, value=999999)), 
+              ~replace(., which(. %in% list(777777,888888,999999)), NA))
+}
+#e.g. dataset %>% clean_missing()
+
+#A sound to let you know that the work is done
+work_complete <- function() {
+  cat("Work complete. Press esc to sound the fanfare!!!\n")
+  on.exit(beepr::beep(3))
+  
+  while (TRUE) {
+    beepr::beep(4)
+    Sys.sleep(1)
+  }
+}
+#e.g. work_complete()
+
+#Create function to display point estimate and confidence interval
+ci_fct <- function(pe, low, high, multiplier=1, scale="%"){
+  res <- paste(multiplier*digits(pe,1),scale, " " ,"(",
+               multiplier*digits(low,1),",",
+               multiplier*digits(high,1), ")", sep="")
+  return(res)
+}
+#ci_fct(pe=1, low=2, high=3, multiplier=1, scale="%")
+
+#To produce summary statistics: density plots, histograms, and bar graphs. 
+
+is_categorical_var <- function(var){
+  #(is.labelled(var) | is.factor(var) | is.character(var)) | (between(n_distinct(x[!is.na(x)]),3,20))
+  (between(n_distinct(x[!is.na(x)]),3,20))
+}
+
+is_binary_var <- function(var){
+  n_distinct(var[!is.na(var)])<=2
+}
+
+is_continous_var <- function(var){
+  
+  if (is.labelled(var)) {
+    var = as.factor(var)
+  }
+  
+  !(n_distinct(var[!is.na(var)])<=2 | is.factor(var))
+}
+
+
+#To produce summary statistics: density plots, histograms, and bar graphs.
+visualize_categorical_vars <- function(.data, .labels=F, exclude=NULL, 
+                                       optional_vars=NULL){
+  
+  if(is.null(optional_vars)) {
+    dsn <- .data %>%
+      dplyr::select(-all_of(exclude)) %>%
+      modify_if(is.labelled, to_factor) %>%
+      dplyr::select(where(is.factor))
+  } else {
+    
+    dsn <- .data %>%
+      modify_if(is.labelled, to_factor) %>%
+      dplyr::select(all_of(optional_vars))
+  }
+  
+  var_names <- dsn %>%
+    var_label() %>% unlist()
+  if(.labels==T) {
+    dsn1 <- dsn %>% # Keep only numeric columns
+      set_colnames(var_names)
+  } else {
+    dsn1 <- dsn
+  }
+  
+  plot_cat <- dsn1 %>%
+    pivot_longer(., cols = everything(),names_to = "key", 
+                 values_to = "value") %>%
+    ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    labs(x="", y="Percent") +
+    geom_bar(aes(y = (..count..)/sum(..count..))) +
+    #geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes(label = scales::percent(round((..count..)/sum(..count..),3)),
+                  y= (..count..)/sum(..count..)), stat= "count", vjust = -.5) +
+    scale_y_continuous(labels=scales::percent) +
+    theme_bw()  +
+    easy_rotate_x_labels(angle = 45,
+                         side = c("right"))
+  return(plot_cat)
+  
+}
+#e.g. visualize_categorical_vars(salsa_analytical,.labels=F, 
+# optional_vars=c("income_5cat", "occup_3cat"))
+
+
+visualize_binary_vars <- function(.data, .labels=F, exclude=NULL, 
+                                  optional_vars=NULL){
+  
+  if(is.null(optional_vars)) {
+    dsn <- .data %>%
+      dplyr::select(-all_of(exclude)) %>%
+      dplyr::select(where(is_binary_var))
+  } else {
+    
+    dsn <- .data %>%
+      dplyr::select(all_of(optional_vars))
+  }
+  
+  var_names <- dsn %>%
+    var_label() %>% unlist()
+  
+  
+  if(.labels==T) {
+    dsn1 <- dsn %>% # Keep only numeric columns
+      set_colnames(var_names)
+    
+  } else {
+    dsn1 <- dsn
+  }
+  
+  plot_bin <- dsn1 %>%
+    mutate_all(as.factor) %>%
+    pivot_longer(., cols = everything(),names_to = "key", 
+                 values_to = "value") %>%
+    ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    labs(x="", y="Percent") +
+    geom_bar(aes(y = (..count..)/sum(..count..))) +
+    #geom_bar(aes(y = ..prop.., fill = factor(..x..)), stat="count") +
+    geom_text(aes(label = scales::percent(round((..count..)/sum(..count..),3)),
+                  y= (..count..)/sum(..count..)), stat= "count", vjust = -.5) +
+    scale_y_continuous(labels=scales::percent) +
+    theme_bw()
+  
+  return(plot_bin)
+  
+}
+#e.g. visualize_binary_vars(salsa_analytical,.labels=F, 
+# optional_vars=c("married"))
+
+
+visualize_continuous_vars <- function(.data, .labels=F,exclude=NULL, 
+                                      optional_vars=NULL){
+  
+  if(is.null(optional_vars)) {
+    dsn <- .data %>%
+      modify_if(is.labelled, to_factor) %>%
+      dplyr::select(-all_of(exclude)) %>%
+      dplyr::select(where(is_continous_var)) 
+    
+  } else {
+    
+    dsn <- .data %>%
+      #dplyr::select(-any_of("id")) %>%
+      dplyr::select(!!sym(optional_vars)) 
+  }
+  
+  
+  var_names <- dsn %>%
+    var_label() %>% unlist()
+  
+  
+  if(.labels==T) {
+    dsn1 <- dsn %>% # Keep only numeric columns
+      set_colnames(var_names)
+    
+  } else {
+    dsn1 <- dsn
+  }
+  
+  plot_cont <- dsn1 %>%
+    mutate_all(as.numeric) %>% 
+    pivot_longer(., cols = everything(), names_to = "key", 
+                 values_to = "value") %>%
+    ggplot(aes(value)) +
+    facet_wrap(~ key, scales = "free") +
+    labs(x="")+
+    geom_histogram(aes(y = ..density..),
+                   colour = 1, fill = "white", stat = "bin", bins=30) +
+    geom_density(lwd = 0.5, colour = 4,
+                 fill = 4, alpha = 0.1) +
+    theme_bw()
+  
+  # plot_cont_density <- dsn1 %>%
+  #   pivot_longer(., cols = everything(),names_to = "key", 
+  #   values_to = "value") %>%
+  #   ggplot(aes(value)) +
+  #   facet_wrap(~ key, scales = "free") +
+  #   geom_density() +
+  #   theme_bw()
+  
+  return(plot_cont)
+  
+}
+#e.g. visualize_continuous_vars(.data=salsa_analytical,
+# .labels=T,optional_vars=NULL)
+#e.g. visualize_continuous_vars(.data=salsa_analytical, 
+# .labels=F, optional_vars=c("age_yrs", "educ_yrs"))
+
+#make variables numeric
+to_numeric <- function(var){
+  suppressWarnings(
+    if (class(var) =="factor") {
+      as.numeric(var)
+    } else if (any(is.na(as.numeric(var)))){
+      as.numeric(as.factor(var))
+    } else {
+      as.numeric(var)
+    }
+  )
+}
+```
+
+#Loading packages
+```{r}
+epi207_packages()
+```
+
+#Set working directory 
+```{r}
+getwd() #check workind directory and ensure it is set to an ideal pathname
+#setwd("ideal path")
+```
+
+#Creating folders
+```{r}
+#create folders for scripts, data, figures, documents, rmd files, and tables 
+#to keep project materials organized
+create_folders() 
+#Comment out after first time running code because folders will be made already
+```
+
+#Loading CHIS data
+```{r}
+############Loading Datasets############
+#upload CHIS data from CHIS website and upload sas dataset with labels into 
+#environment
+#change pathname in quotes to location where data is stored on device
+adult_chis_data <- read_sas("/Users/nikichurchill/Desktop/Winter 2025/Epi 207/Assignment 1/Adult SAS/adult.sas7bdat") 
+```
+
+#Cleaning CHIS data
+```{r}
+#Select variables from original data
+clean_ogname_data <- adult_chis_data %>% 
+  #select variables of interest from Sung paper
+  select(SRAGE_P, #age
+         SRSEX,   #gender
+         SRH,     #ethnicity: Hispanic
+         SRAI,    #race: American Indian
+         SRAS,    #race: Asian
+         SRAA,    #race: African American
+         SRW,     #race: White
+         SRO,     #race: Other
+         RACEHPR2,#race alternative using census
+         RACECEN, 
+         RACEDOF, 
+         AE15,    #Smoking
+         AD32, 
+         AD34, 
+         AE15A, 
+         AE16, 
+         NUMCIG, 
+         SMKCUR, 
+         SMOKING, 
+         BINGE12, #Binge Drinking
+         BMI_P,   #BMI
+         RBMI,    
+         DISTRESS,#SPD
+         DSTRS30, #SPD in past month
+         DSTRS12, #SPD in past year
+         AHEDUC,  #education 
+         WRKST,   #work status
+         POVLL,   #poverty level
+         POVLL2_P,
+         SRTENR,  #self-reported household tenure
+         MARIT,   #marital status
+         RAKEDW0, #weights
+         matches("^RAKEDW[1-9][0-9]*$"),
+         PROXY    #proxy interview
+         )
+
+#rename variables, create new ones, and filter to go from 51048 to 50880
+clean_data <- clean_ogname_data %>%
+  #rename variables with more intuitive names
+  mutate(age           = SRAGE_P, #age
+         gender        = SRSEX,   #gender
+         ethnic        = SRH,     #ethnicity: Hispanic
+         race_ai       = SRAI,    #race: American Indian
+         race_a        = SRAS,    #race: Asian
+         race_aa       = SRAA,    #race: African American
+         race_w        = SRW,     #race: White
+         race_o        = SRO,     #race: Other
+         smoke_100     = AE15,    #smoked 100+ in lifetime
+         current_smoke = SMKCUR,  #current/not current smoker
+         smoke_habit   = SMOKING, #currently, quit, or never smoked
+         daily_numcig  = AD32,    #numcig daily IF >100 smoked AND currently smoke daily
+         some_numcig   = AE16,    #numcig daily IF smoke some days
+         num_cig       = NUMCIG,  #numcig daily all adults
+         drink         = BINGE12, #Binge Drinking
+         bmi           = BMI_P,   #BMI
+         bmi_label     = RBMI,    
+         spd           = DISTRESS,#SPD
+         spd_month     = DSTRS30, #SPD in past month
+         spd_year      = DSTRS12, #SPD in past year
+         edu           = AHEDUC,  #education 
+         emply_status  = WRKST,   #work status
+         poverty       = POVLL,   #poverty level (not same as paper)
+         poverty_fpl   = POVLL2_P,
+         tenure        = SRTENR,  #self-reported household tenure
+         marital       = MARIT,   #marital status
+         weight        = RAKEDW0, #sample weights
+    
+         #create variables to match ones in paper with categories
+         race_ethnic = case_when(
+           race_w == 1 & ethnic == 2 ~ "Non-Hispanic White (reference)",
+           race_aa == 1 & ethnic == 2 ~ "Non-Hispanic Black",
+           race_a == 1 & ethnic == 2 ~ "Non-Hispanic Asian",
+           race_ai == 1 & ethnic == 2 ~ "Non-Hispanic American Indians/Alaska",
+           race_o == 1 & ethnic == 2 ~ "Non-Hispanic Other",
+           ethnic == 1 ~ "Hispanic",
+           TRUE ~ as.character(NA)),
+         poverty_lvl = case_when(
+           poverty_fpl < 1 ~ "<100% FPL (reference)",
+           poverty_fpl >= 1 & poverty_fpl < 2 ~ "100%-199% FPL",
+           poverty_fpl >= 2 & poverty_fpl < 4 ~ "200%-399% FPL",
+           poverty_fpl >= 4 ~ "≥ 400% FPL",
+           TRUE ~ as.character(NA)),
+         binge = case_when(
+           drink == 1 ~ "No",
+           drink == 2 ~ "Yes",
+           drink == 3 ~ "Yes",
+           drink == 4 ~ "Yes",
+           drink == 5 ~ "Yes",
+           drink == 6 ~ "Yes",
+           TRUE ~ as.character(NA)),
+         edu_lvl = case_when(
+           edu == 1 ~ "<High-school degree",
+           edu == 2 ~ "<High-school degree",
+           edu == 91 ~ "<High-school degree",
+           edu == 3 ~ "High-school graduate (reference)",
+           edu == 4 ~ "Some college",
+           edu == 5 ~ "College or more",
+           edu == 6 ~ "College or more",
+           edu == 7 ~ "College or more",
+           edu == 8 ~ "College or more",
+           edu == 9 ~ "College or more",
+           edu == 10 ~ "College or more"),
+         spd_lvl = case_when(
+           spd_month == 1 ~ "Acute SPD",
+           spd_month == 2 & spd_year == 1 ~ "Recent SPD",
+           spd_year == 2 ~ "No SPD",
+           TRUE ~ as.character(NA)),
+         daily_numcig = ifelse(daily_numcig == -1, NA, daily_numcig), 
+         some_numcig = ifelse(some_numcig == -1, NA, some_numcig),
+         evcur_smoke = case_when(
+           smoke_100 == 1 & current_smoke == 1 ~ "Current",
+           smoke_100 == 1 & current_smoke == 2 ~ "Ever",
+           smoke_100 == 2 ~ "Never",
+           TRUE ~ as.character(NA)),
+         freq_smoke = case_when(
+           !is.na(daily_numcig) ~ "Daily",
+           !is.na(some_numcig) ~ "Someday",
+           is.na(daily_numcig) & is.na(some_numcig) ~ "Never",
+           TRUE ~ as.character(NA)),
+         quant_smoke = case_when(
+           daily_numcig >= 20 ~ "Heavy",
+           TRUE ~ as.character(NA)),
+        marital =  case_when(
+          marital == 1 ~ "Married (reference)",
+          marital == 2 ~ "Other",
+          marital == 3 ~ "Never married",
+          TRUE ~ as.character(NA)),
+        age_cat = case_when(
+          age >= 18 & age < 26 ~ "18–25 (reference)",
+          age >= 26 & age < 35 ~ "26–34",
+          age >= 35 & age < 50 ~ "35–49",
+          age >= 50 ~ "50+",
+          TRUE ~ as.character(NA)),
+         ) %>% 
+  #filter to go from 51048 to 50880
+  filter(!is.na(spd_lvl), !is.na(PROXY)) %>%
+  #select variables used in paper from created/renamed variables
+  select(age,
+         age_cat,
+         gender,   
+         race_ethnic, 
+         smoke_100,
+         current_smoke,
+         smoke_habit, 
+         daily_numcig,
+         some_numcig,
+         num_cig,
+         binge,
+         bmi_label,
+         spd_lvl,
+         edu_lvl,
+         emply_status,
+         poverty_lvl,
+         evcur_smoke,
+         freq_smoke,
+         quant_smoke,
+         marital,
+         weight,
+         matches("^RAKEDW[1-9][0-9]*$"),
+         ) %>%
+  #variable labeling
+  set_variable_labels(
+    race_ethnic = "Race/Ethnicity (6 cat)",
+    poverty_lvl = "Poverty level (4 cat)", 
+    spd_lvl = "Serious Psychological Distress (3 cat)" 
+    ) %>%
+  #value labeling
+  set_value_labels( 
+    gender = c("Male" = 1,
+               "Female" = 2),
+    bmi_label = c("Underweight" = 1,
+                  "Normal (reference)" = 2,
+                  "Overweight" = 3,
+                  "Obese" = 4),
+    emply_status = c("Full-time (reference)" = 1,
+                     "Part-time" = 2,
+                     "Employed but not work" = 3,
+                     "Unemployed and look for work" = 4,
+                     "Unemployed but not look for work" = 5),
+    smoke_100 = c("Yes" = 1,
+                  "No" = 2),
+    current_smoke = c("Yes" = 1,
+                      "No" = 2),
+    smoke_habit = c("Current smoker" = 1,
+                    "Quit smoking" = 2,
+                    "Never smoked regularly" = 3),
+    num_cig = c("None" = 1,
+                "≤ 1 cigarette" = 2,
+                "2-5 cigarettes" = 3,
+                "6-10 cigarettes" = 4,
+                "11-19 cigarettes" = 5,
+                "20 or more cigarettes" = 6)
+  ) %>%
+  #rename variable names to lower case
+  rename_with(tolower, .cols = everything())
+
+#weight data
+library(survey)
+# Identify replicate weight columns
+repweight_cols <- grep("^rakedw[1-9][0-9]*$", names(clean_data), value = TRUE)
+
+# Calculate the number of replicate weights
+n_replicates <- length(repweight_cols)
+
+# Create the survey design object with explicit scale
+svy_design <- svrepdesign(
+  data = clean_data,
+  weights = ~weight,  # Main weight
+  repweights = as.matrix(clean_data[, repweight_cols]),  # Subset replicate weights as a matrix
+  type = "JK1",
+  scale = (n_replicates - 1) / n_replicates,  # Jackknife scaling
+  combined.weights = TRUE,
+  mse = TRUE)
+
+#write cleaned data as RDS file and DTA file
+write_rds(clean_data, here("data", "output_data", "clean_sung_data_1.28.RDS"))
+write_dta(clean_data, here("data", "output_data", "clean_sung_data_1.28.dta"))
+```
+
+#Data Dictionary
+```{r}
+#Data dictionary function creation 
+datadic_var <- function(.data, var) {
+  list_var <- .data %>% 
+    look_for(var) %>% #search variables
+    as_tibble() %>% #convert gtsummary object into a tibble
+    select(variable) %>% #select variables
+    as.matrix() %>% #create matrix of variables in data
+    as.vector() #create vector of variables in data
+  binary_var <- .data %>%
+    dplyr::select(where(is_binary_var)) %>% #identify binary variables
+    colnames() #name cloumns
+  cb <- .data %>%
+    select(all_of(list_var)) %>% #select all variables
+    codebook::codebook_table() %>% #create data dictionary table
+    dplyr::rename(`Variable name` = name, #name variables and labels and type of variable
+                  Label = label,
+                  `Variable type` = data_type,
+                  #Values = value_labels,
+                  `Complete rate` = complete_rate) %>%
+    select(-c(n_missing, min, sd, median, #remove summary stats
+              max, mean, hist, contains("format"))) %>%
+    mutate(`Variable type` = 
+             case_when(`Variable type`=="haven_labelled" ~ "categorical", #create variable type labels
+                       `Variable type`=="factor" ~ "categorical",
+                       `Variable type`=="numeric" ~ "continuous",
+                                       TRUE ~ `Variable type`),
+           `Variable type` = 
+             case_when(`Variable name` %in% binary_var~ "binary",
+                                       TRUE ~ `Variable type`),
+           n_unique = 
+             case_when(`Variable name` %in% binary_var ~ as.integer(2),
+                                TRUE ~ as.integer(n_unique)))
+  TF="value_labels" %in% colnames(cb)
+  if(TF==F){
+    cb %<>% mutate(
+      value_labels = case_when(`Variable name` %in% #include value labels
+                                 binary_var~ "1, 2",  TRUE ~ NA_character_)) %>%
+      as_tibble() %>%
+      select(`Variable name`, `Variable label`= Label,
+             `Variable type`,
+             n_unique)
+  } else {
+    cb %<>% mutate(
+      value_labels = case_when(`Variable name` %in% 
+                                 binary_var~ "1, 2", TRUE ~ value_labels)) %>%
+      as_tibble() %>%
+      select(`Variable name`, `Variable label`= Label,
+             `Variable type`,
+             `Value labels` = value_labels,
+             n_unique)
+  }
+}
+
+is_categorical_var <- function(var){
+  #(is.labelled(var) | is.factor(var) | is.character(var)) | (between(n_distinct(x[!is.na(x)]),3,20))
+  (between(n_distinct(var[!is.na(var)]),3,20))
+}
+is_binary_var <- function(var){
+  n_distinct(var[!is.na(var)])<=2
+}
+is_continous_var <- function(var){
+  if (is.labelled(var)) {
+    var = as.factor(var)
+  }
+  !(n_distinct(var[!is.na(var)])<=2 | is.factor(var))
+}
+
+datadic <- clean_data %>% datadic_var("")
+
+write_xlsx(datadic, here("tables", "CHIS_Sung_datadic.xlsx"))
+```
+
+#Codebook
+```{r}
+library(tidyverse)
+library(epiDisplay)
+library(readxl)
+
+#comment out the two lines below if you saved the cleaned data and data dictionary differently
+#datadic <- read_excel("~/Downloads/CHIS_Sung_datadic.xlsx") 
+#clean_data <- readRDS("~/Downloads/clean_sung_data.RDS")
+
+codebook <- function(data, var, categorical = TRUE, print.values = TRUE) {
+  # Pull the variable description from the dictionary
+  var_description <- datadic %>% 
+    filter(`Variable name` == var) %>% 
+    pull(`Variable label`)
+  
+  # Pull variable coding from the dictionary
+  var_values <- datadic %>% 
+    filter(`Variable name` == var) %>% 
+    pull(`Value labels`)
+  
+  # Print out information to be included in the codebook
+  print(str_c(var, ": ", var_description))
+  if (!is.na(var_values) & print.values) {
+    print(var_values)
+  }
+  
+  if (categorical) {
+    # Print the frequency table for categorical variables
+    # with absolute, relative, and cumulative frequencies
+    print(str_c("Frequency table of ", var))
+    tab1(data[[var]], graph = FALSE, cum.percent = TRUE) %>% print()
+  } else {
+    x <- data[[var]] %>% as.vector()
+    na_count <- sum(is.na(x))
+    na_perc <- round(na_count / length(x), digits = 3)
+    print(str_c("NA Frequency: ", na_count, " (", 100 * na_perc, "%)"))
+    try(hist(x, main = NULL, xlab = paste(var)))
+  }
+  
+  cat("\n\n")
+}
+
+```
+
+#Variables
+```{r}
+codebook(clean_data, "age", categorical = FALSE)
+codebook(clean_data, "gender", categorical = T)
+codebook(clean_data, "race_ethnic", categorical = T)
+codebook(clean_data, "smoke_100", categorical = T)
+codebook(clean_data, "current_smoke", categorical = T)
+codebook(clean_data, "smoke_habit", categorical = T)
+codebook(clean_data, "daily_numcig", categorical = FALSE)
+codebook(clean_data, "some_numcig", categorical = FALSE)
+codebook(clean_data, "num_cig", categorical = T)
+codebook(clean_data, "binge", categorical = T)
+codebook(clean_data, "bmi_label", categorical = T)
+codebook(clean_data, "spd_lvl", categorical = T)
+codebook(clean_data, "edu_lvl", categorical = T)
+codebook(clean_data, "emply_status", categorical = T)
+codebook(clean_data, "poverty_lvl", categorical = T)
+codebook(clean_data, "evcur_smoke", categorical = T)
+codebook(clean_data, "freq_smoke", categorical = T)
+codebook(clean_data, "quant_smoke", categorical = T)
+codebook(clean_data, "weight", categorical = FALSE)
+```
+
+#Table 1
+```{r}
+clean_data_tab1 <- clean_data %>% 
+  mutate(gender = case_when(gender == 1 ~ "Male",
+                            gender == 2 ~ "Female"),
+    bmi_label = case_when(bmi_label == 1 ~ "Underweight",
+                          bmi_label == 2 ~ "Normal",
+                          bmi_label == 3 ~ "Overweight",
+                          bmi_label == 4 ~ "Obese"),
+    emply_status = case_when(emply_status == 1 ~ "Full-time (reference)",
+                             emply_status == 2 ~ "Part-time",
+                             emply_status == 3 ~ "Employed but not work",
+                             emply_status == 4 ~ "Unemployed and look for work",
+                             emply_status == 5 ~ "Unemployed but not look for work"),
+    smoke_100 = case_when(smoke_100 == 1 ~ "Yes",
+                          smoke_100 == 2 ~ "No"),
+    current_smoke = case_when(current_smoke == 1 ~ "Yes",
+                              current_smoke == 2 ~ "No"),
+    smoke_habit = case_when(smoke_habit == 1 ~ "Current smoker",
+                            smoke_habit == 2 ~ "Quit smoking",
+                            smoke_habit == 3 ~ "Never smoked regularly"),
+    num_cig = case_when(num_cig == 1 ~ "None",
+                        num_cig == 2 ~ "≤ 1 cigarette",
+                        num_cig == 3 ~ "2-5 cigarettes",
+                        num_cig == 4 ~ "6-10 cigarettes",
+                        num_cig == 5 ~ "11-19 cigarettes",
+                        num_cig == 6 ~ "20 or more cigarettes")) %>%
+  set_variable_labels(
+    gender = "Gender",
+    age_cat = "Age",
+    binge = "Binge drinking status",
+    bmi_label = "Body weight status",
+    emply_status = "Employment level",
+    edu_lvl = "Education status (4 cat)",
+    marital = "Marital status (3 cat)")
+
+clean_data_tab1$spd_lvl <- factor(clean_data_tab1$spd_lvl, levels = c("No SPD", "Acute SPD", "Recent SPD"))
+
+table(clean_data_tab1$spd_lvl)
+
+#Working Table 1 code
+table1 <- clean_data_tab1 %>% 
+  select(spd_lvl, 
+         age_cat, 
+         gender, 
+         race_ethnic, 
+         binge, 
+         marital,
+         bmi_label, 
+         edu_lvl, 
+         emply_status, 
+         poverty_lvl) %>%
+  tbl_summary(
+    by = spd_lvl,
+    percent="row",
+    missing = "no",
+    type = list(
+      all_continuous() ~ "continuous2"  # Custom formatting for continuous variables
+    ),
+    statistic = list(
+      all_continuous() ~ c("{mean} ({sd})"),  # Show mean, sd
+      all_categorical() ~ "{n} ({p}%)"  # Show counts and percentages for categorical variables
+    )) %>% 
+  modify_column_hide(columns = "stat_1") %>%
+  modify_header(label = "**Variable**") %>%  # Customize header for the first column
+  add_stat_label(location = "row") %>%  # Add statistical labels (e.g., "Mean (SD)")
+  modify_spanning_header(
+    starts_with("stat_") ~ "Table 1"  # Add a spanning header across statistics columns
+) %>%
+  add_overall(
+  statistic = list(
+    all_categorical() ~ "{n}",  # For the overall column, show only counts
+    all_continuous() ~ "{mean} ({sd})"  # Keep the same format for continuous variables
+  ),
+  last = FALSE, # Placement at front
+  col_label = "**Unweighted sample size**"
+) %>%
+modify_footnote(all_stat_cols() ~ "FPL = federal poverty level; SPD = serious psychological distress. Acute SPD: Screened for SPD in the past thirty days. Recent SPD: Screened for SPD in the past twelve months but not past thirty days.")
+
+table1
+
+# Export Table 1 to Word document
+table1 %>% 
+  as_flex_table() %>%  # Convert gtsummary object to flextable object
+  flextable::save_as_docx(path = here("tables", "table1_selected_var.docx"))  # Save as Word file
+```
